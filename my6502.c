@@ -83,16 +83,27 @@ static void my_update_sr_with_carry(uint8_t reg_value, uint8_t flags,
 	}
 }
 
+static void my_push(uint8_t value)
+{
+	my6502_write(STACK_OFFSET + my_sp--, value);
+}
+
+static uint8_t my_pop(void)
+{
+	return my6502_read(STACK_OFFSET + ++my_sp);
+}
+
 /* Addressing modes. */
 enum my_addr {
 	IMMEDIATE,
 	ABSOLUTE,
 	RELATIVE,
+	INDIRECT,
 };
 
 static uint16_t my_read_addr(enum my_addr mode)
 {
-	uint16_t addr;
+	uint16_t addr, effective_addr;
 
 	switch (mode) {
 	case ABSOLUTE:
@@ -102,6 +113,14 @@ static uint16_t my_read_addr(enum my_addr mode)
 	case RELATIVE:
 		addr = my6502_read(my_pc++);
 		return my_pc + (int8_t)addr;
+	case INDIRECT:
+		addr = my6502_read(my_pc++);
+		addr |= (my6502_read(my_pc++) << 8);
+
+		effective_addr = my6502_read(addr++);
+		effective_addr |= (my6502_read(addr++) << 8);
+
+		return effective_addr;
 	default:
 		assert(0);
 		break;
@@ -256,6 +275,18 @@ static void my_jmp(uint16_t addr)
 	my_pc = addr;
 }
 
+/* Jump to New Location Saving Return Address. */
+static void my_jsr(uint16_t addr)
+{
+	/* Mimic the hardware behaviour that saves the 8-bit buffer. */
+	uint16_t old_pc = my_pc - 1;
+
+	my_push(old_pc >> 8);
+	my_push(old_pc);
+
+	my_pc = addr;
+}
+
 static void my_inx(void)
 {
 	my_update_sr(++my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
@@ -285,30 +316,39 @@ static void my_ldy(uint8_t value)
 	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
+static void my_rts(void)
+{
+	my_pc = my_pop();
+	my_pc |= my_pop() << 8;
+
+	/* Mimic the hardware behaviour, see JSR. */
+	my_pc++;
+}
+
 /* Push Accumulator on Stack. */
 static void my_pha(void)
 {
-	my6502_write(STACK_OFFSET + my_sp--, my_ac);
+	my_push(my_ac);
 }
 
 static void my_php(void)
 {
 	/* The status register will be pushed with the break
 	 * flag and bit 5 set to 1. */
-	my6502_write(STACK_OFFSET + my_sp--, my_sr | SR_FLAG_UNUSED | SR_FLAG_BREAK);
+	my_push(my_sr | SR_FLAG_UNUSED | SR_FLAG_BREAK);
 }
 
 /* Pull Accumulator from Stack. */
 static void my_pla(void)
 {
-	my_ac = my6502_read(STACK_OFFSET + ++my_sp);
+	my_ac = my_pop();
 	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
 /* Pull Processor Status from Stack. */
 static void my_plp(void)
 {
-	my_sr = my6502_read(STACK_OFFSET + ++my_sp) | SR_FLAG_UNUSED;
+	my_sr = my_pop() | SR_FLAG_UNUSED;
 }
 
 static void my_sta(uint16_t addr)
@@ -368,6 +408,9 @@ void my6502_step(void)
 	case 0x18:
 		my_clc();
 		break;
+	case 0x20:
+		my_jsr(my_read_addr(ABSOLUTE));
+		break;
 	case 0x28:
 		my_plp();
 		break;
@@ -386,11 +429,17 @@ void my6502_step(void)
 	case 0x50:
 		my_bvc(my_read_addr(RELATIVE));
 		break;
+	case 0x60:
+		my_rts();
+		break;
 	case 0x68:
 		my_pla();
 		break;
 	case 0x69:
 		my_adc(my_read_op(IMMEDIATE));
+		break;
+	case 0x6C:
+		my_jmp(my_read_addr(INDIRECT));
 		break;
 	case 0x70:
 		my_bvs(my_read_addr(RELATIVE));
