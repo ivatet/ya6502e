@@ -57,7 +57,7 @@ uint8_t my6502_read(uint16_t address)
 void my6502_write(uint16_t address, uint8_t value)
 {
 	printf("! wr(%04x) = %02x\n", address, value);
-	fake6502_mem[address] = value;
+	my6502_mem[address] = value;
 }
 
 static void dump_my6502_reg(void)
@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
 
 	dump_fake6502_reg();
 	dump_my6502_reg();
-	for (i = 0; i < 20; i++)
+	for (i = 0; i < 40; i++)
 	{
 		printf("step %d\n", i);
 		step6502();

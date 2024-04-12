@@ -37,12 +37,6 @@ uint8_t my_ac, my_x, my_y, my_sr, my_sp;
 
 #define SR_IS_SET(bit)    (my_sr & (bit))
 
-/* Addressing modes. */
-enum my_addr {
-	IMMEDIATE,
-	ABSOLUTE,
-};
-
 void my6502_reset(uint16_t pc)
 {
 	my_pc = pc;
@@ -75,21 +69,68 @@ static void my_update_sr(uint8_t value, uint8_t flags)
 	}
 }
 
+static void my_update_sr_with_carry(uint8_t reg_value, uint8_t flags,
+                                    uint8_t carry_value)
+{
+	my_update_sr(reg_value, flags);
+	if (carry_value) {
+		SR_SET(SR_FLAG_CARRY);
+	} else {
+		SR_CLR(SR_FLAG_CARRY);
+	}
+}
+
+/* Addressing modes. */
+enum my_addr {
+	IMMEDIATE,
+	ABSOLUTE,
+	RELATIVE,
+};
+
+static uint16_t my_read_addr(enum my_addr mode)
+{
+	uint16_t addr;
+
+	switch (mode) {
+	case ABSOLUTE:
+		addr = my6502_read(my_pc++);
+		addr |= (my6502_read(my_pc++) << 8);
+		return addr;
+	case RELATIVE:
+		addr = my6502_read(my_pc++);
+		return my_pc + (int8_t)addr;
+	default:
+		assert(0);
+		break;
+	}
+}
+
+static uint8_t my_read_op(enum my_addr mode)
+{
+	switch (mode) {
+	case ABSOLUTE:
+		return my6502_read(my_read_addr(mode));
+	case IMMEDIATE:
+		return my6502_read(my_pc++);
+	default:
+		assert(0);
+		break;
+	}
+}
+
 /* Branch on Result not Zero. */
-static void my_bne(void)
+static void my_bne(uint16_t addr)
 {
 	if (!SR_IS_SET(SR_FLAG_ZERO)) {
-		uint8_t offset = my6502_read(my_pc++);
-		my_pc = my_pc + (int8_t)offset;
+		my_pc = addr;
 	}
 }
 
 /* Branch on Result Zero. */
-static void my_beq(void)
+static void my_beq(uint16_t addr)
 {
 	if (SR_IS_SET(SR_FLAG_ZERO)) {
-		uint8_t offset = my6502_read(my_pc++);
-		my_pc = my_pc + (int8_t)offset;
+		my_pc = addr;
 	}
 }
 
@@ -97,6 +138,12 @@ static void my_beq(void)
 static void my_cld(void)
 {
 	my_sr &= ~SR_FLAG_DECIMAL;
+}
+
+static void my_cmp(uint8_t value)
+{
+	my_update_sr_with_carry(my_ac - value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO,
+	                        my_ac >= value);
 }
 
 /* Decrement Index X by One */
@@ -111,65 +158,33 @@ static void my_dey(void)
 	my_update_sr(--my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
-static void my_jmp(enum my_addr mode)
+static void my_jmp(uint16_t addr)
 {
-	uint16_t addr;
-
-	switch (mode) {
-	case ABSOLUTE:
-		addr = my6502_read(my_pc++);
-		addr |= (my6502_read(my_pc++) << 8);
-		my_pc = addr;
-		break;
-	default:
-		assert(0);
-		break;
-	}
+	my_pc = addr;
 }
 
 /* Load Accumulator with Memory */
-static void my_lda(enum my_addr mode)
+static void my_lda(uint8_t value)
 {
-	switch (mode) {
-	case IMMEDIATE:
-		my_ac = my6502_read(my_pc++);
-		my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
-		break;
-	default:
-		assert(0);
-		break;
-	}
+	my_ac = value;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
-static void my_ld_index(uint8_t *reg, enum my_addr mode)
+static void my_ldx(uint8_t value)
 {
-	assert(reg);
-
-	switch (mode) {
-	case IMMEDIATE:
-		*reg = my6502_read(my_pc++);
-		my_update_sr(*reg, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
-		break;
-	default:
-		assert(0);
-		break;
-	}
+	my_x = value;
+	my_update_sr(my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
-static void my_sta(enum my_addr mode)
+static void my_ldy(uint8_t value)
 {
-	uint16_t addr;
+	my_y = value;
+	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
 
-	switch (mode) {
-	case ABSOLUTE:
-		addr = my6502_read(my_pc++);
-		addr |= (my6502_read(my_pc++) << 8);
-		my6502_write(addr, my_ac);
-		break;
-	default:
-		assert(0);
-		break;
-	}
+static void my_sta(uint16_t addr)
+{
+	my6502_write(addr, my_ac);
 }
 
 /* Transfer Index X to Stack Register. */
@@ -178,42 +193,58 @@ static void my_txs(void)
 	my_sp = my_x;
 }
 
+/* Transfer Index Y to Accumulator. */
+static void my_tya(void)
+{
+	my_ac = my_y;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
 void my6502_step(void)
 {
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
 	case 0x4C:
-		my_jmp(ABSOLUTE);
+		my_jmp(my_read_addr(ABSOLUTE));
 		break;
 	case 0x88:
 		my_dey();
 		break;
 	case 0x8D:
-		my_sta(ABSOLUTE);
+		my_sta(my_read_addr(ABSOLUTE));
+		break;
+	case 0x98:
+		my_tya();
 		break;
 	case 0x9A:
 		my_txs();
 		break;
 	case 0xA0:
-		my_ld_index(&my_y, IMMEDIATE); /* ldy */
+		my_ldy(my_read_op(IMMEDIATE));
 		break;
 	case 0xA2:
-		my_ld_index(&my_x, IMMEDIATE); /* ldx */
+		my_ldx(my_read_op(IMMEDIATE));
 		break;
 	case 0xA9:
-		my_lda(IMMEDIATE);
+		my_lda(my_read_op(IMMEDIATE));
+		break;
+	case 0xAD:
+		my_lda(my_read_op(ABSOLUTE));
+		break;
+	case 0xC9:
+		my_cmp(my_read_op(IMMEDIATE));
 		break;
 	case 0xCA:
 		my_dex();
 		break;
 	case 0xD0:
-		my_bne();
+		my_bne(my_read_addr(RELATIVE));
 		break;
 	case 0xD8:
 		my_cld();
 		break;
 	case 0xF0:
-		my_beq();
+		my_beq(my_read_addr(RELATIVE));
 		break;
 	}
 }
