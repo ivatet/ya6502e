@@ -35,6 +35,8 @@ uint8_t my_ac, my_x, my_y, my_sr, my_sp;
 #define SR_CLR(bit)       (my_sr &= ~(bit))
 #define SR_SET(bit)       (my_sr |= (bit))
 
+#define SR_IS_SET(bit)    (my_sr & (bit))
+
 /* Addressing modes. */
 enum my_addr {
 	IMMEDIATE,
@@ -76,7 +78,16 @@ static void my_update_sr(uint8_t value, uint8_t flags)
 /* Branch on Result not Zero. */
 static void my_bne(void)
 {
-	if (my_sr | SR_FLAG_ZERO) {
+	if (!SR_IS_SET(SR_FLAG_ZERO)) {
+		uint8_t offset = my6502_read(my_pc++);
+		my_pc = my_pc + (int8_t)offset;
+	}
+}
+
+/* Branch on Result Zero. */
+static void my_beq(void)
+{
+	if (SR_IS_SET(SR_FLAG_ZERO)) {
 		uint8_t offset = my6502_read(my_pc++);
 		my_pc = my_pc + (int8_t)offset;
 	}
@@ -92,6 +103,12 @@ static void my_cld(void)
 static void my_dex(void)
 {
 	my_update_sr(--my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+/* Decrement Index Y by One */
+static void my_dey(void)
+{
+	my_update_sr(--my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
 static void my_jmp(enum my_addr mode)
@@ -124,12 +141,14 @@ static void my_lda(enum my_addr mode)
 	}
 }
 
-static void my_ldx(enum my_addr mode)
+static void my_ld_index(uint8_t *reg, enum my_addr mode)
 {
+	assert(reg);
+
 	switch (mode) {
 	case IMMEDIATE:
-		my_x = my6502_read(my_pc++);
-		my_update_sr(my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+		*reg = my6502_read(my_pc++);
+		my_update_sr(*reg, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 		break;
 	default:
 		assert(0);
@@ -166,14 +185,20 @@ void my6502_step(void)
 	case 0x4C:
 		my_jmp(ABSOLUTE);
 		break;
+	case 0x88:
+		my_dey();
+		break;
 	case 0x8D:
 		my_sta(ABSOLUTE);
 		break;
 	case 0x9A:
 		my_txs();
 		break;
+	case 0xA0:
+		my_ld_index(&my_y, IMMEDIATE); /* ldy */
+		break;
 	case 0xA2:
-		my_ldx(IMMEDIATE);
+		my_ld_index(&my_x, IMMEDIATE); /* ldx */
 		break;
 	case 0xA9:
 		my_lda(IMMEDIATE);
@@ -186,6 +211,9 @@ void my6502_step(void)
 		break;
 	case 0xD8:
 		my_cld();
+		break;
+	case 0xF0:
+		my_beq();
 		break;
 	}
 }

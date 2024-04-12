@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
 
 	dump_fake6502_reg();
 	dump_my6502_reg();
-	for (i = 0; i < 10; i++)
+	for (i = 0; i < 20; i++)
 	{
 		printf("step %d\n", i);
 		step6502();
