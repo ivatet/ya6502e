@@ -37,6 +37,9 @@ uint8_t my_ac, my_x, my_y, my_sr, my_sp;
 
 #define SR_IS_SET(bit)    (my_sr & (bit))
 
+/* Memory layout. */
+#define STACK_OFFSET      0x100
+
 void my6502_reset(uint16_t pc)
 {
 	my_pc = pc;
@@ -138,10 +141,26 @@ static void my_adc(uint8_t value)
 	my_ac = result;
 }
 
+/* Branch on Carry Set. */
+static void my_bcs(uint16_t addr)
+{
+	if (SR_IS_SET(SR_FLAG_CARRY)) {
+		my_pc = addr;
+	}
+}
+
 /* Branch on Result not Zero. */
 static void my_bne(uint16_t addr)
 {
 	if (!SR_IS_SET(SR_FLAG_ZERO)) {
+		my_pc = addr;
+	}
+}
+
+/* Branch on Carry Clear. */
+static void my_bcc(uint16_t addr)
+{
+	if (!SR_IS_SET(SR_FLAG_CARRY)) {
 		my_pc = addr;
 	}
 }
@@ -154,10 +173,31 @@ static void my_beq(uint16_t addr)
 	}
 }
 
+static void my_bmi(uint16_t addr)
+{
+	if (SR_IS_SET(SR_FLAG_NEGATIVE)) {
+		my_pc = addr;
+	}
+}
+
 /* Branch on Result Plus. */
 static void my_bpl(uint16_t addr)
 {
 	if (!SR_IS_SET(SR_FLAG_NEGATIVE)) {
+		my_pc = addr;
+	}
+}
+
+static void my_bvc(uint16_t addr)
+{
+	if (!SR_IS_SET(SR_FLAG_OVERFLOW)) {
+		my_pc = addr;
+	}
+}
+
+static void my_bvs(uint16_t addr)
+{
+	if (SR_IS_SET(SR_FLAG_OVERFLOW)) {
 		my_pc = addr;
 	}
 }
@@ -180,6 +220,18 @@ static void my_cmp(uint8_t value)
 	                        my_ac >= value);
 }
 
+static void my_cpx(uint8_t value)
+{
+	my_update_sr_with_carry(my_x - value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO,
+	                        my_x >= value);
+}
+
+static void my_cpy(uint8_t value)
+{
+	my_update_sr_with_carry(my_y - value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO,
+	                        my_y >= value);
+}
+
 /* Decrement Index X by One */
 static void my_dex(void)
 {
@@ -192,9 +244,26 @@ static void my_dey(void)
 	my_update_sr(--my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
+/* Exclusive-OR Memory with Accumulator. */
+static void my_eor(uint8_t value)
+{
+	my_ac ^= value;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
 static void my_jmp(uint16_t addr)
 {
 	my_pc = addr;
+}
+
+static void my_inx(void)
+{
+	my_update_sr(++my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+static void my_iny(void)
+{
+	my_update_sr(++my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
 /* Load Accumulator with Memory */
@@ -216,6 +285,32 @@ static void my_ldy(uint8_t value)
 	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
+/* Push Accumulator on Stack. */
+static void my_pha(void)
+{
+	my6502_write(STACK_OFFSET + my_sp--, my_ac);
+}
+
+static void my_php(void)
+{
+	/* The status register will be pushed with the break
+	 * flag and bit 5 set to 1. */
+	my6502_write(STACK_OFFSET + my_sp--, my_sr | SR_FLAG_UNUSED | SR_FLAG_BREAK);
+}
+
+/* Pull Accumulator from Stack. */
+static void my_pla(void)
+{
+	my_ac = my6502_read(STACK_OFFSET + ++my_sp);
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+/* Pull Processor Status from Stack. */
+static void my_plp(void)
+{
+	my_sr = my6502_read(STACK_OFFSET + ++my_sp) | SR_FLAG_UNUSED;
+}
+
 static void my_sta(uint16_t addr)
 {
 	my6502_write(addr, my_ac);
@@ -226,6 +321,25 @@ static void my_tax(void)
 {
 	my_x = my_ac;
 	my_update_sr(my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+static void my_tay(void)
+{
+	my_y = my_ac;
+	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+/* Transfer Stack Pointer to Index X. */
+static void my_tsx(void)
+{
+	my_x = my_sp;
+	my_update_sr(my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+static void my_txa(void)
+{
+	my_ac = my_x;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
 /* Transfer Index X to Stack Register. */
@@ -245,23 +359,53 @@ void my6502_step(void)
 {
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
+	case 0x08:
+		my_php();
+		break;
 	case 0x10:
 		my_bpl(my_read_addr(RELATIVE));
 		break;
 	case 0x18:
 		my_clc();
 		break;
+	case 0x28:
+		my_plp();
+		break;
+	case 0x30:
+		my_bmi(my_read_addr(RELATIVE));
+		break;
+	case 0x48:
+		my_pha();
+		break;
+	case 0x49:
+		my_eor(my_read_op(IMMEDIATE));
+		break;
 	case 0x4C:
 		my_jmp(my_read_addr(ABSOLUTE));
+		break;
+	case 0x50:
+		my_bvc(my_read_addr(RELATIVE));
+		break;
+	case 0x68:
+		my_pla();
 		break;
 	case 0x69:
 		my_adc(my_read_op(IMMEDIATE));
 		break;
+	case 0x70:
+		my_bvs(my_read_addr(RELATIVE));
+		break;
 	case 0x88:
 		my_dey();
 		break;
+	case 0x8A:
+		my_txa();
+		break;
 	case 0x8D:
 		my_sta(my_read_addr(ABSOLUTE));
+		break;
+	case 0x90:
+		my_bcc(my_read_addr(RELATIVE));
 		break;
 	case 0x98:
 		my_tya();
@@ -275,6 +419,9 @@ void my6502_step(void)
 	case 0xA2:
 		my_ldx(my_read_op(IMMEDIATE));
 		break;
+	case 0xA8:
+		my_tay();
+		break;
 	case 0xA9:
 		my_lda(my_read_op(IMMEDIATE));
 		break;
@@ -284,17 +431,38 @@ void my6502_step(void)
 	case 0xAD:
 		my_lda(my_read_op(ABSOLUTE));
 		break;
+	case 0xB0:
+		my_bcs(my_read_addr(RELATIVE));
+		break;
+	case 0xBA:
+		my_tsx();
+		break;
+	case 0xC0:
+		my_cpy(my_read_op(IMMEDIATE));
+		break;
+	case 0xC8:
+		my_iny();
+		break;
 	case 0xC9:
 		my_cmp(my_read_op(IMMEDIATE));
 		break;
 	case 0xCA:
 		my_dex();
 		break;
+	case 0xCD:
+		my_cmp(my_read_op(ABSOLUTE));
+		break;
 	case 0xD0:
 		my_bne(my_read_addr(RELATIVE));
 		break;
 	case 0xD8:
 		my_cld();
+		break;
+	case 0xE0:
+		my_cpx(my_read_op(IMMEDIATE));
+		break;
+	case 0xE8:
+		my_inx();
 		break;
 	case 0xEA:
 		/* NOP */
