@@ -118,6 +118,26 @@ static uint8_t my_read_op(enum my_addr mode)
 	}
 }
 
+/* Add Memory to Accumulator with Carry. */
+static void my_adc(uint8_t value)
+{
+	uint16_t result;
+	result = (uint16_t)my_ac + (uint16_t)value;
+	if (SR_IS_SET(SR_FLAG_CARRY)) {
+		result++;
+	}
+
+	if (result >= 0x100) {
+		SR_SET(SR_FLAG_CARRY);
+	} else {
+		SR_CLR(SR_FLAG_CARRY);
+	}
+
+	/* It loses the higher byte, but it is OK because we have
+	 * already computed the carry flag to accommodate it. */
+	my_ac = result;
+}
+
 /* Branch on Result not Zero. */
 static void my_bne(uint16_t addr)
 {
@@ -132,6 +152,20 @@ static void my_beq(uint16_t addr)
 	if (SR_IS_SET(SR_FLAG_ZERO)) {
 		my_pc = addr;
 	}
+}
+
+/* Branch on Result Plus. */
+static void my_bpl(uint16_t addr)
+{
+	if (!SR_IS_SET(SR_FLAG_NEGATIVE)) {
+		my_pc = addr;
+	}
+}
+
+/* Clear Carry Flag. */
+static void my_clc(void)
+{
+	my_sr &= ~SR_FLAG_CARRY;
 }
 
 /* Clear Decimal Mode. */
@@ -187,6 +221,13 @@ static void my_sta(uint16_t addr)
 	my6502_write(addr, my_ac);
 }
 
+/* Transfer Accumulator to Index X. */
+static void my_tax(void)
+{
+	my_x = my_ac;
+	my_update_sr(my_x, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
 /* Transfer Index X to Stack Register. */
 static void my_txs(void)
 {
@@ -204,8 +245,17 @@ void my6502_step(void)
 {
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
+	case 0x10:
+		my_bpl(my_read_addr(RELATIVE));
+		break;
+	case 0x18:
+		my_clc();
+		break;
 	case 0x4C:
 		my_jmp(my_read_addr(ABSOLUTE));
+		break;
+	case 0x69:
+		my_adc(my_read_op(IMMEDIATE));
 		break;
 	case 0x88:
 		my_dey();
@@ -228,6 +278,9 @@ void my6502_step(void)
 	case 0xA9:
 		my_lda(my_read_op(IMMEDIATE));
 		break;
+	case 0xAA:
+		my_tax();
+		break;
 	case 0xAD:
 		my_lda(my_read_op(ABSOLUTE));
 		break;
@@ -243,8 +296,14 @@ void my6502_step(void)
 	case 0xD8:
 		my_cld();
 		break;
+	case 0xEA:
+		/* NOP */
+		break;
 	case 0xF0:
 		my_beq(my_read_addr(RELATIVE));
+		break;
+	default:
+		assert(0);
 		break;
 	}
 }
