@@ -132,6 +132,11 @@ int main(int argc, char *argv[])
 			dump_my6502_reg();
 			return 1;
 		}
+
+		if (memcmp(fake6502_mem, my6502_mem, sizeof(fake6502_mem))) {
+			printf("! memory mismatch\n");
+			return 1;
+		}
 	}
 
 	printf("stopped\n");
