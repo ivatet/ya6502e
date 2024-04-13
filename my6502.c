@@ -136,7 +136,8 @@ static uint16_t my_read_addr(enum my_addr mode)
 	case ZEROPAGE:
 		return my6502_read(my_pc++);
 	case ZEROPAGE_Y:
-		return my6502_read(my_pc++) + my_y;
+		/* Wrap around without penalty for crossing page boundaries. */
+		return (my6502_read(my_pc++) + my_y) & 0xFF;
 	default:
 		assert(0);
 		break;
@@ -561,6 +562,9 @@ void my6502_step(void)
 	case 0x90:
 		my_bcc(my_read_addr(RELATIVE));
 		break;
+	case 0x96:
+		my_stx(my_read_addr(ZEROPAGE_Y));
+		break;
 	case 0x98:
 		my_tya();
 		break;
@@ -602,6 +606,9 @@ void my6502_step(void)
 		break;
 	case 0xB8:
 		my_clv();
+		break;
+	case 0xB9:
+		my_lda(my_read_op(ABSOLUTE_Y));
 		break;
 	case 0xBA:
 		my_tsx();
