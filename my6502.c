@@ -39,6 +39,7 @@ uint8_t my_ac, my_x, my_y, my_sr, my_sp;
 
 /* Memory layout. */
 #define STACK_OFFSET      0x100
+#define IRQ_OFFSET        0xFFFE
 
 void my6502_reset(uint16_t pc)
 {
@@ -97,30 +98,45 @@ static uint8_t my_pop(void)
 enum my_addr {
 	IMMEDIATE,
 	ABSOLUTE,
+	ABSOLUTE_X,
+	ABSOLUTE_Y,
 	RELATIVE,
 	INDIRECT,
+	ZEROPAGE,
+	ZEROPAGE_Y,
 };
+
+static uint16_t my_read_addr_from_mem(uint16_t *reg)
+{
+	uint16_t addr;
+
+	addr = my6502_read((*reg)++);
+	addr |= (my6502_read((*reg)++) << 8);
+
+	return addr;
+}
 
 static uint16_t my_read_addr(enum my_addr mode)
 {
-	uint16_t addr, effective_addr;
+	uint16_t addr;
 
 	switch (mode) {
 	case ABSOLUTE:
-		addr = my6502_read(my_pc++);
-		addr |= (my6502_read(my_pc++) << 8);
-		return addr;
+		return my_read_addr_from_mem(&my_pc);
+	case ABSOLUTE_X:
+		return my_read_addr_from_mem(&my_pc) + my_x;
+	case ABSOLUTE_Y:
+		return my_read_addr_from_mem(&my_pc) + my_y;
 	case RELATIVE:
 		addr = my6502_read(my_pc++);
 		return my_pc + (int8_t)addr;
 	case INDIRECT:
-		addr = my6502_read(my_pc++);
-		addr |= (my6502_read(my_pc++) << 8);
-
-		effective_addr = my6502_read(addr++);
-		effective_addr |= (my6502_read(addr++) << 8);
-
-		return effective_addr;
+		addr = my_read_addr_from_mem(&my_pc);
+		return my_read_addr_from_mem(&addr);
+	case ZEROPAGE:
+		return my6502_read(my_pc++);
+	case ZEROPAGE_Y:
+		return my6502_read(my_pc++) + my_y;
 	default:
 		assert(0);
 		break;
@@ -131,6 +147,11 @@ static uint8_t my_read_op(enum my_addr mode)
 {
 	switch (mode) {
 	case ABSOLUTE:
+	case ABSOLUTE_X:
+	case ABSOLUTE_Y:
+	case ZEROPAGE:
+	case ZEROPAGE_Y:
+		return my6502_read(my_read_addr(mode));
 		return my6502_read(my_read_addr(mode));
 	case IMMEDIATE:
 		return my6502_read(my_pc++);
@@ -207,6 +228,21 @@ static void my_bpl(uint16_t addr)
 	}
 }
 
+/* Force Break. */
+static void my_brk(void)
+{
+	uint16_t return_addr = my_pc + 1;
+
+	my_push(return_addr >> 8);
+	my_push(return_addr);
+	my_push(my_sr | SR_FLAG_BREAK);
+
+	my_pc = my6502_read(IRQ_OFFSET);
+	my_pc |= my6502_read(IRQ_OFFSET + 1) << 8;
+
+	my_sr |= SR_FLAG_INTERRUPT;
+}
+
 static void my_bvc(uint16_t addr)
 {
 	if (!SR_IS_SET(SR_FLAG_OVERFLOW)) {
@@ -231,6 +267,16 @@ static void my_clc(void)
 static void my_cld(void)
 {
 	my_sr &= ~SR_FLAG_DECIMAL;
+}
+
+static void my_cli(void)
+{
+	my_sr &= ~SR_FLAG_INTERRUPT;
+}
+
+static void my_clv(void)
+{
+	my_sr &= ~SR_FLAG_OVERFLOW;
 }
 
 static void my_cmp(uint8_t value)
@@ -316,6 +362,20 @@ static void my_ldy(uint8_t value)
 	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
+static void my_ora(uint8_t value)
+{
+	my_ac |= value;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+}
+
+static void my_rti(void)
+{
+	my_sr = my_pop() | SR_FLAG_BREAK;
+
+	my_pc = my_pop();
+	my_pc |= my_pop() << 8;
+}
+
 static void my_rts(void)
 {
 	my_pc = my_pop();
@@ -335,7 +395,7 @@ static void my_php(void)
 {
 	/* The status register will be pushed with the break
 	 * flag and bit 5 set to 1. */
-	my_push(my_sr | SR_FLAG_UNUSED | SR_FLAG_BREAK);
+	my_push(my_sr | SR_FLAG_BREAK);
 }
 
 /* Pull Accumulator from Stack. */
@@ -348,12 +408,33 @@ static void my_pla(void)
 /* Pull Processor Status from Stack. */
 static void my_plp(void)
 {
+	/* The unused bit must always be set. */
 	my_sr = my_pop() | SR_FLAG_UNUSED;
+}
+
+static void my_sec(void)
+{
+	my_sr |= SR_FLAG_CARRY;
+}
+
+static void my_sed(void)
+{
+	my_sr |= SR_FLAG_DECIMAL;
+}
+
+static void my_sei(void)
+{
+	my_sr |= SR_FLAG_INTERRUPT;
 }
 
 static void my_sta(uint16_t addr)
 {
 	my6502_write(addr, my_ac);
+}
+
+static void my_stx(uint16_t addr)
+{
+	my6502_write(addr, my_x);
 }
 
 /* Transfer Accumulator to Index X. */
@@ -399,8 +480,14 @@ void my6502_step(void)
 {
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
+	case 0x00:
+		my_brk();
+		break;
 	case 0x08:
 		my_php();
+		break;
+	case 0x09:
+		my_ora(my_read_op(IMMEDIATE));
 		break;
 	case 0x10:
 		my_bpl(my_read_addr(RELATIVE));
@@ -417,6 +504,12 @@ void my6502_step(void)
 	case 0x30:
 		my_bmi(my_read_addr(RELATIVE));
 		break;
+	case 0x38:
+		my_sec();
+		break;
+	case 0x40:
+		my_rti();
+		break;
 	case 0x48:
 		my_pha();
 		break;
@@ -428,6 +521,9 @@ void my6502_step(void)
 		break;
 	case 0x50:
 		my_bvc(my_read_addr(RELATIVE));
+		break;
+	case 0x58:
+		my_cli();
 		break;
 	case 0x60:
 		my_rts();
@@ -444,6 +540,15 @@ void my6502_step(void)
 	case 0x70:
 		my_bvs(my_read_addr(RELATIVE));
 		break;
+	case 0x78:
+		my_sei();
+		break;
+	case 0x85:
+		my_sta(my_read_addr(ZEROPAGE));
+		break;
+	case 0x86:
+		my_stx(my_read_addr(ZEROPAGE));
+		break;
 	case 0x88:
 		my_dey();
 		break;
@@ -459,6 +564,9 @@ void my6502_step(void)
 	case 0x98:
 		my_tya();
 		break;
+	case 0x99:
+		my_sta(my_read_addr(ABSOLUTE_Y));
+		break;
 	case 0x9A:
 		my_txs();
 		break;
@@ -467,6 +575,12 @@ void my6502_step(void)
 		break;
 	case 0xA2:
 		my_ldx(my_read_op(IMMEDIATE));
+		break;
+	case 0xA5:
+		my_lda(my_read_op(ZEROPAGE));
+		break;
+	case 0xA6:
+		my_ldx(my_read_op(ZEROPAGE));
 		break;
 	case 0xA8:
 		my_tay();
@@ -483,8 +597,20 @@ void my6502_step(void)
 	case 0xB0:
 		my_bcs(my_read_addr(RELATIVE));
 		break;
+	case 0xB6:
+		my_ldx(my_read_op(ZEROPAGE_Y));
+		break;
+	case 0xB8:
+		my_clv();
+		break;
 	case 0xBA:
 		my_tsx();
+		break;
+	case 0xBD:
+		my_lda(my_read_op(ABSOLUTE_X));
+		break;
+	case 0xBE:
+		my_ldx(my_read_op(ABSOLUTE_Y));
 		break;
 	case 0xC0:
 		my_cpy(my_read_op(IMMEDIATE));
@@ -507,6 +633,9 @@ void my6502_step(void)
 	case 0xD8:
 		my_cld();
 		break;
+	case 0xD9:
+		my_cmp(my_read_op(ABSOLUTE_Y));
+		break;
 	case 0xE0:
 		my_cpx(my_read_op(IMMEDIATE));
 		break;
@@ -518,6 +647,9 @@ void my6502_step(void)
 		break;
 	case 0xF0:
 		my_beq(my_read_addr(RELATIVE));
+		break;
+	case 0xF8:
+		my_sed();
 		break;
 	default:
 		assert(0);
