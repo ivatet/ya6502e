@@ -102,7 +102,9 @@ enum my_addr {
 	ABSOLUTE_Y,
 	RELATIVE,
 	INDIRECT,
+	INDIRECT_Y,
 	ZEROPAGE,
+	ZEROPAGE_X,
 	ZEROPAGE_Y,
 };
 
@@ -133,10 +135,15 @@ static uint16_t my_read_addr(enum my_addr mode)
 	case INDIRECT:
 		addr = my_read_addr_from_mem(&my_pc);
 		return my_read_addr_from_mem(&addr);
+	case INDIRECT_Y:
+		addr = my6502_read(my_pc++);
+		return my_read_addr_from_mem(&addr) + my_y;
 	case ZEROPAGE:
 		return my6502_read(my_pc++);
-	case ZEROPAGE_Y:
+	case ZEROPAGE_X:
 		/* Wrap around without penalty for crossing page boundaries. */
+		return (my6502_read(my_pc++) + my_x) & 0xFF;
+	case ZEROPAGE_Y:
 		return (my6502_read(my_pc++) + my_y) & 0xFF;
 	default:
 		assert(0);
@@ -150,7 +157,9 @@ static uint8_t my_read_op(enum my_addr mode)
 	case ABSOLUTE:
 	case ABSOLUTE_X:
 	case ABSOLUTE_Y:
+	case INDIRECT_Y:
 	case ZEROPAGE:
+	case ZEROPAGE_X:
 	case ZEROPAGE_Y:
 		return my6502_read(my_read_addr(mode));
 		return my6502_read(my_read_addr(mode));
@@ -438,6 +447,11 @@ static void my_stx(uint16_t addr)
 	my6502_write(addr, my_x);
 }
 
+static void my_sty(uint16_t addr)
+{
+	my6502_write(addr, my_y);
+}
+
 /* Transfer Accumulator to Index X. */
 static void my_tax(void)
 {
@@ -544,6 +558,9 @@ void my6502_step(void)
 	case 0x78:
 		my_sei();
 		break;
+	case 0x84:
+		my_sty(my_read_addr(ZEROPAGE));
+		break;
 	case 0x85:
 		my_sta(my_read_addr(ZEROPAGE));
 		break;
@@ -556,11 +573,23 @@ void my6502_step(void)
 	case 0x8A:
 		my_txa();
 		break;
+	case 0x8C:
+		my_sty(my_read_addr(ABSOLUTE));
+		break;
 	case 0x8D:
 		my_sta(my_read_addr(ABSOLUTE));
 		break;
+	case 0x8E:
+		my_stx(my_read_addr(ABSOLUTE));
+		break;
 	case 0x90:
 		my_bcc(my_read_addr(RELATIVE));
+		break;
+	case 0x94:
+		my_sty(my_read_addr(ZEROPAGE_X));
+		break;
+	case 0x95:
+		my_sta(my_read_addr(ZEROPAGE_X));
 		break;
 	case 0x96:
 		my_stx(my_read_addr(ZEROPAGE_Y));
@@ -574,11 +603,17 @@ void my6502_step(void)
 	case 0x9A:
 		my_txs();
 		break;
+	case 0x9D:
+		my_sta(my_read_addr(ABSOLUTE_X));
+		break;
 	case 0xA0:
 		my_ldy(my_read_op(IMMEDIATE));
 		break;
 	case 0xA2:
 		my_ldx(my_read_op(IMMEDIATE));
+		break;
+	case 0xA4:
+		my_ldy(my_read_op(ZEROPAGE));
 		break;
 	case 0xA5:
 		my_lda(my_read_op(ZEROPAGE));
@@ -595,11 +630,26 @@ void my6502_step(void)
 	case 0xAA:
 		my_tax();
 		break;
+	case 0xAC:
+		my_ldy(my_read_op(ABSOLUTE));
+		break;
 	case 0xAD:
 		my_lda(my_read_op(ABSOLUTE));
 		break;
+	case 0xAE:
+		my_ldx(my_read_op(ABSOLUTE));
+		break;
 	case 0xB0:
 		my_bcs(my_read_addr(RELATIVE));
+		break;
+	case 0xB1:
+		my_lda(my_read_op(INDIRECT_Y));
+		break;
+	case 0xB4:
+		my_ldy(my_read_op(ZEROPAGE_X));
+		break;
+	case 0xB5:
+		my_lda(my_read_op(ZEROPAGE_X));
 		break;
 	case 0xB6:
 		my_ldx(my_read_op(ZEROPAGE_Y));
@@ -613,6 +663,9 @@ void my6502_step(void)
 	case 0xBA:
 		my_tsx();
 		break;
+	case 0xBC:
+		my_ldy(my_read_op(ABSOLUTE_X));
+		break;
 	case 0xBD:
 		my_lda(my_read_op(ABSOLUTE_X));
 		break;
@@ -621,6 +674,12 @@ void my6502_step(void)
 		break;
 	case 0xC0:
 		my_cpy(my_read_op(IMMEDIATE));
+		break;
+	case 0xC4:
+		my_cpy(my_read_op(ZEROPAGE));
+		break;
+	case 0xC5:
+		my_cmp(my_read_op(ZEROPAGE));
 		break;
 	case 0xC8:
 		my_iny();
@@ -631,11 +690,17 @@ void my6502_step(void)
 	case 0xCA:
 		my_dex();
 		break;
+	case 0xCC:
+		my_cpy(my_read_op(ABSOLUTE));
+		break;
 	case 0xCD:
 		my_cmp(my_read_op(ABSOLUTE));
 		break;
 	case 0xD0:
 		my_bne(my_read_addr(RELATIVE));
+		break;
+	case 0xD5:
+		my_cmp(my_read_op(ZEROPAGE_X));
 		break;
 	case 0xD8:
 		my_cld();
@@ -643,14 +708,23 @@ void my6502_step(void)
 	case 0xD9:
 		my_cmp(my_read_op(ABSOLUTE_Y));
 		break;
+	case 0xDD:
+		my_cmp(my_read_op(ABSOLUTE_X));
+		break;
 	case 0xE0:
 		my_cpx(my_read_op(IMMEDIATE));
+		break;
+	case 0xE4:
+		my_cpx(my_read_op(ZEROPAGE));
 		break;
 	case 0xE8:
 		my_inx();
 		break;
 	case 0xEA:
 		/* NOP */
+		break;
+	case 0xEC:
+		my_cpx(my_read_op(ABSOLUTE));
 		break;
 	case 0xF0:
 		my_beq(my_read_addr(RELATIVE));
