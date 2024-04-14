@@ -370,6 +370,13 @@ static void my_cpy(uint8_t value)
 	                        my_y >= value);
 }
 
+static void my_dec(uint16_t addr)
+{
+	uint8_t value = my6502_read(addr);
+	my_update_sr(--value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+	my6502_write(addr, value);
+}
+
 /* Decrement Index X by One */
 static void my_dex(void)
 {
@@ -404,6 +411,13 @@ static void my_jsr(uint16_t addr)
 	my_push(old_pc);
 
 	my_pc = addr;
+}
+
+static void my_inc(uint16_t addr)
+{
+	uint8_t value = my6502_read(addr);
+	my_update_sr(++value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
+	my6502_write(addr, value);
 }
 
 static void my_inx(void)
@@ -601,6 +615,7 @@ void my6502_step(void)
 	OP(0x10, my_bpl(my_read_addr(RELATIVE)));
 	OP(0x16, my_asl(my_read_op(ZEROPAGE_X)));
 	OP(0x18, my_clc());
+	OP(0x1E, my_asl(my_read_op(ABSOLUTE_X)));
 	OP(0x20, my_jsr(my_read_addr(ABSOLUTE)));
 	OP(0x24, my_bit(my_read_op(ZEROPAGE)));
 	OP(0x26, my_rol(my_read_op(ZEROPAGE)));
@@ -609,7 +624,9 @@ void my6502_step(void)
 	OP(0x2C, my_bit(my_read_op(ABSOLUTE)));
 	OP(0x2E, my_rol(my_read_op(ABSOLUTE)));
 	OP(0x30, my_bmi(my_read_addr(RELATIVE)));
+	OP(0x36, my_rol(my_read_op(ZEROPAGE_X)));
 	OP(0x38, my_sec());
+	OP(0x3E, my_rol(my_read_op(ABSOLUTE_X)));
 	OP(0x40, my_rti());
 	OP(0x46, my_lsr(my_read_op(ZEROPAGE)));
 	OP(0x48, my_pha());
@@ -620,6 +637,7 @@ void my6502_step(void)
 	OP(0x50, my_bvc(my_read_addr(RELATIVE)));
 	OP(0x56, my_lsr(my_read_op(ZEROPAGE_X)));
 	OP(0x58, my_cli());
+	OP(0x5E, my_lsr(my_read_op(ABSOLUTE_X)));
 	OP(0x60, my_rts());
 	OP(0x66, my_ror(my_read_op(ZEROPAGE)));
 	OP(0x68, my_pla());
@@ -628,7 +646,9 @@ void my6502_step(void)
 	OP(0x6C, my_jmp(my_read_addr(INDIRECT)));
 	OP(0x6E, my_ror(my_read_op(ABSOLUTE)));
 	OP(0x70, my_bvs(my_read_addr(RELATIVE)));
+	OP(0x76, my_ror(my_read_op(ZEROPAGE_X)));
 	OP(0x78, my_sei());
+	OP(0x7E, my_ror(my_read_op(ABSOLUTE_X)));
 	OP(0x81, my_sta(my_read_addr(INDIRECT_X)));
 	OP(0x84, my_sty(my_read_addr(ZEROPAGE)));
 	OP(0x85, my_sta(my_read_addr(ZEROPAGE)));
@@ -674,24 +694,32 @@ void my6502_step(void)
 	OP(0xC1, my_cmp(my_read_op(INDIRECT_X)));
 	OP(0xC4, my_cpy(my_read_op(ZEROPAGE)));
 	OP(0xC5, my_cmp(my_read_op(ZEROPAGE)));
+	OP(0xC6, my_dec(my_read_addr(ZEROPAGE)));
 	OP(0xC8, my_iny());
 	OP(0xC9, my_cmp(my_read_op(IMMEDIATE)));
 	OP(0xCA, my_dex());
 	OP(0xCC, my_cpy(my_read_op(ABSOLUTE)));
 	OP(0xCD, my_cmp(my_read_op(ABSOLUTE)));
+	OP(0xCE, my_dec(my_read_addr(ABSOLUTE)));
 	OP(0xD0, my_bne(my_read_addr(RELATIVE)));
 	OP(0xD1, my_cmp(my_read_op(INDIRECT_Y)));
 	OP(0xD5, my_cmp(my_read_op(ZEROPAGE_X)));
+	OP(0xD6, my_dec(my_read_addr(ZEROPAGE_X)));
 	OP(0xD8, my_cld());
 	OP(0xD9, my_cmp(my_read_op(ABSOLUTE_Y)));
 	OP(0xDD, my_cmp(my_read_op(ABSOLUTE_X)));
+	OP(0xDE, my_dec(my_read_addr(ABSOLUTE_X)));
 	OP(0xE0, my_cpx(my_read_op(IMMEDIATE)));
+	OP(0xE6, my_inc(my_read_addr(ZEROPAGE)));
 	OP(0xE4, my_cpx(my_read_op(ZEROPAGE)));
 	OP(0xE8, my_inx());
 	OP(0xEA, my_nop());
 	OP(0xEC, my_cpx(my_read_op(ABSOLUTE)));
+	OP(0xEE, my_inc(my_read_addr(ABSOLUTE)));
 	OP(0xF0, my_beq(my_read_addr(RELATIVE)));
+	OP(0xF6, my_inc(my_read_addr(ZEROPAGE_X)));
 	OP(0xF8, my_sed());
+	OP(0xFE, my_inc(my_read_addr(ABSOLUTE_X)));
 	default:
 		assert(0);
 		break;
