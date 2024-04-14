@@ -100,6 +100,7 @@ enum my_addr {
 	ABSOLUTE,
 	ABSOLUTE_X,
 	ABSOLUTE_Y,
+	ACCUMULATOR,
 	RELATIVE,
 	INDIRECT,
 	INDIRECT_X,
@@ -155,8 +156,18 @@ static uint16_t my_read_addr(enum my_addr mode)
 	}
 }
 
-static uint8_t my_read_op(enum my_addr mode)
+/* Return the 32-bit integer layout for ASL and a few other opcodes:
+ *
+ * - 0th byte is the effective operand/value
+ * - 1st byte is the addressing mode
+ * - 2-3rd bytes are the address (machine-native ordering)
+ *
+ * Most users can discard all but the 0th byte.
+ * */
+static uint32_t my_read_op(enum my_addr mode)
 {
+	uint16_t addr;
+
 	switch (mode) {
 	case ABSOLUTE:
 	case ABSOLUTE_X:
@@ -166,13 +177,28 @@ static uint8_t my_read_op(enum my_addr mode)
 	case ZEROPAGE:
 	case ZEROPAGE_X:
 	case ZEROPAGE_Y:
-		return my6502_read(my_read_addr(mode));
-		return my6502_read(my_read_addr(mode));
+		addr = my_read_addr(mode);
+		return (addr << 16) | (mode << 8) | my6502_read(addr);
 	case IMMEDIATE:
-		return my6502_read(my_pc++);
+		addr = my_pc++;
+		return (addr << 16) | (mode << 8) | my6502_read(addr);
+	case ACCUMULATOR:
+		return (mode << 8) | my_ac;
 	default:
 		assert(0);
 		break;
+	}
+}
+
+static void my_write_op(uint32_t op, uint8_t value)
+{
+	enum my_addr mode = (op >> 8) & 0xFF;
+	uint16_t addr = (op >> 16);
+
+	if (mode != ACCUMULATOR) {
+		my6502_write(addr, value);
+	} else {
+		my_ac = value;
 	}
 }
 
@@ -196,23 +222,14 @@ static void my_adc(uint8_t value)
 	my_ac = result;
 }
 
-/* Shift Left One Bit (Accumulator only).
- *
- * FIXME Generalise the "operand" to represent a register.
- */
-static uint8_t my_asl_impl(uint8_t value)
+/* Shift Left One Bit (Memory or Accumulator).*/
+static void my_asl(uint32_t op)
 {
+	uint8_t value = (uint8_t)op;
 	uint8_t msb = value & 0x80;
 	value <<= 1;
 	my_update_sr_with_carry(value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO, msb);
-	return value;
-}
-
-static void my_asl(uint16_t addr)
-{
-	uint8_t value = my6502_read(addr);
-	value = my_asl_impl(value);
-	my6502_write(addr, value);
+	my_write_op(op, value);
 }
 
 /* Branch on Carry Set. */
@@ -418,20 +435,14 @@ static void my_ldy(uint8_t value)
 	my_update_sr(my_y, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
-/* Shift One Bit Right (Accumulator only) */
-static uint8_t my_lsr_impl(uint8_t value)
+/* Shift One Bit Right (Memory or Accumulator) */
+static void my_lsr(uint32_t op)
 {
+	uint8_t value = (uint8_t)op;
 	uint8_t lsb = value & 0x01;
 	value >>= 1;
 	my_update_sr_with_carry(value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO, lsb);
-	return value;
-}
-
-static void my_lsr(uint16_t addr)
-{
-	uint8_t value = my6502_read(addr);
-	value = my_lsr_impl(value);
-	my6502_write(addr, value);
+	my_write_op(op, value);
 }
 
 static void my_ora(uint8_t value)
@@ -440,34 +451,22 @@ static void my_ora(uint8_t value)
 	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
-static uint8_t my_rol_impl(uint8_t value)
+static void my_rol(uint32_t op)
 {
+	uint8_t value = (uint8_t)op;
 	uint8_t msb = value & 0x80;
 	value = (value << 1) + (my_sr & SR_FLAG_CARRY);
 	my_update_sr_with_carry(value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO, msb);
-	return value;
+	my_write_op(op, value);
 }
 
-static void my_rol(uint16_t addr)
+static void my_ror(uint32_t op)
 {
-	uint8_t value = my6502_read(addr);
-	value = my_rol_impl(value);
-	my6502_write(addr, value);
-}
-
-static uint8_t my_ror_impl(uint8_t value)
-{
+	uint8_t value = (uint8_t)op;
 	uint8_t lsb = value & 0x01;
 	value = (value >> 1) + (my_sr & SR_FLAG_CARRY ? 0x80 : 0x00);
 	my_update_sr_with_carry(value, SR_FLAG_NEGATIVE | SR_FLAG_ZERO, lsb);
-	return value;
-}
-
-static void my_ror(uint16_t addr)
-{
-	uint8_t value = my6502_read(addr);
-	value = my_ror_impl(value);
-	my6502_write(addr, value);
+	my_write_op(op, value);
 }
 
 static void my_rti(void)
@@ -592,7 +591,7 @@ void my6502_step(void)
 		my_brk();
 		break;
 	case 0x06:
-		my_asl(my_read_addr(ZEROPAGE));
+		my_asl(my_read_op(ZEROPAGE));
 		break;
 	case 0x08:
 		my_php();
@@ -601,16 +600,16 @@ void my6502_step(void)
 		my_ora(my_read_op(IMMEDIATE));
 		break;
 	case 0x0A:
-		my_ac = my_asl_impl(my_ac);
+		my_asl(my_read_op(ACCUMULATOR));
 		break;
 	case 0x0E:
-		my_asl(my_read_addr(ABSOLUTE));
+		my_asl(my_read_op(ABSOLUTE));
 		break;
 	case 0x10:
 		my_bpl(my_read_addr(RELATIVE));
 		break;
 	case 0x16:
-		my_asl(my_read_addr(ZEROPAGE_X));
+		my_asl(my_read_op(ZEROPAGE_X));
 		break;
 	case 0x18:
 		my_clc();
@@ -622,19 +621,19 @@ void my6502_step(void)
 		my_bit(my_read_op(ZEROPAGE));
 		break;
 	case 0x26:
-		my_rol(my_read_addr(ZEROPAGE));
+		my_rol(my_read_op(ZEROPAGE));
 		break;
 	case 0x28:
 		my_plp();
 		break;
 	case 0x2A:
-		my_ac = my_rol_impl(my_ac);
+		my_rol(my_read_op(ACCUMULATOR));
 		break;
 	case 0x2C:
 		my_bit(my_read_op(ABSOLUTE));
 		break;
 	case 0x2E:
-		my_rol(my_read_addr(ABSOLUTE));
+		my_rol(my_read_op(ABSOLUTE));
 		break;
 	case 0x30:
 		my_bmi(my_read_addr(RELATIVE));
@@ -646,7 +645,7 @@ void my6502_step(void)
 		my_rti();
 		break;
 	case 0x46:
-		my_lsr(my_read_addr(ZEROPAGE));
+		my_lsr(my_read_op(ZEROPAGE));
 		break;
 	case 0x48:
 		my_pha();
@@ -655,19 +654,19 @@ void my6502_step(void)
 		my_eor(my_read_op(IMMEDIATE));
 		break;
 	case 0x4A:
-		my_ac = my_lsr_impl(my_ac);
+		my_lsr(my_read_op(ACCUMULATOR));
 		break;
 	case 0x4C:
 		my_jmp(my_read_addr(ABSOLUTE));
 		break;
 	case 0x4E:
-		my_lsr(my_read_addr(ABSOLUTE));
+		my_lsr(my_read_op(ABSOLUTE));
 		break;
 	case 0x50:
 		my_bvc(my_read_addr(RELATIVE));
 		break;
 	case 0x56:
-		my_lsr(my_read_addr(ZEROPAGE_X));
+		my_lsr(my_read_op(ZEROPAGE_X));
 		break;
 	case 0x58:
 		my_cli();
@@ -676,7 +675,7 @@ void my6502_step(void)
 		my_rts();
 		break;
 	case 0x66:
-		my_ror(my_read_addr(ZEROPAGE));
+		my_ror(my_read_op(ZEROPAGE));
 		break;
 	case 0x68:
 		my_pla();
@@ -685,13 +684,13 @@ void my6502_step(void)
 		my_adc(my_read_op(IMMEDIATE));
 		break;
 	case 0x6A:
-		my_ac = my_ror_impl(my_ac);
+		my_ror(my_read_op(ACCUMULATOR));
 		break;
 	case 0x6C:
 		my_jmp(my_read_addr(INDIRECT));
 		break;
 	case 0x6E:
-		my_ror(my_read_addr(ABSOLUTE));
+		my_ror(my_read_op(ABSOLUTE));
 		break;
 	case 0x70:
 		my_bvs(my_read_addr(RELATIVE));
