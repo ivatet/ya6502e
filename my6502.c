@@ -445,6 +445,10 @@ static void my_lsr(uint32_t op)
 	my_write_op(op, value);
 }
 
+static void my_nop(void)
+{
+}
+
 static void my_ora(uint8_t value)
 {
 	my_ac |= value;
@@ -582,311 +586,112 @@ static void my_tya(void)
 	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
+#define OP(code, action) case code: action; break
+
 void my6502_step(void)
 {
-	/* FIXME Decode the opcodes as AAABBBCC. */
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
-	case 0x00:
-		my_brk();
-		break;
-	case 0x06:
-		my_asl(my_read_op(ZEROPAGE));
-		break;
-	case 0x08:
-		my_php();
-		break;
-	case 0x09:
-		my_ora(my_read_op(IMMEDIATE));
-		break;
-	case 0x0A:
-		my_asl(my_read_op(ACCUMULATOR));
-		break;
-	case 0x0E:
-		my_asl(my_read_op(ABSOLUTE));
-		break;
-	case 0x10:
-		my_bpl(my_read_addr(RELATIVE));
-		break;
-	case 0x16:
-		my_asl(my_read_op(ZEROPAGE_X));
-		break;
-	case 0x18:
-		my_clc();
-		break;
-	case 0x20:
-		my_jsr(my_read_addr(ABSOLUTE));
-		break;
-	case 0x24:
-		my_bit(my_read_op(ZEROPAGE));
-		break;
-	case 0x26:
-		my_rol(my_read_op(ZEROPAGE));
-		break;
-	case 0x28:
-		my_plp();
-		break;
-	case 0x2A:
-		my_rol(my_read_op(ACCUMULATOR));
-		break;
-	case 0x2C:
-		my_bit(my_read_op(ABSOLUTE));
-		break;
-	case 0x2E:
-		my_rol(my_read_op(ABSOLUTE));
-		break;
-	case 0x30:
-		my_bmi(my_read_addr(RELATIVE));
-		break;
-	case 0x38:
-		my_sec();
-		break;
-	case 0x40:
-		my_rti();
-		break;
-	case 0x46:
-		my_lsr(my_read_op(ZEROPAGE));
-		break;
-	case 0x48:
-		my_pha();
-		break;
-	case 0x49:
-		my_eor(my_read_op(IMMEDIATE));
-		break;
-	case 0x4A:
-		my_lsr(my_read_op(ACCUMULATOR));
-		break;
-	case 0x4C:
-		my_jmp(my_read_addr(ABSOLUTE));
-		break;
-	case 0x4E:
-		my_lsr(my_read_op(ABSOLUTE));
-		break;
-	case 0x50:
-		my_bvc(my_read_addr(RELATIVE));
-		break;
-	case 0x56:
-		my_lsr(my_read_op(ZEROPAGE_X));
-		break;
-	case 0x58:
-		my_cli();
-		break;
-	case 0x60:
-		my_rts();
-		break;
-	case 0x66:
-		my_ror(my_read_op(ZEROPAGE));
-		break;
-	case 0x68:
-		my_pla();
-		break;
-	case 0x69:
-		my_adc(my_read_op(IMMEDIATE));
-		break;
-	case 0x6A:
-		my_ror(my_read_op(ACCUMULATOR));
-		break;
-	case 0x6C:
-		my_jmp(my_read_addr(INDIRECT));
-		break;
-	case 0x6E:
-		my_ror(my_read_op(ABSOLUTE));
-		break;
-	case 0x70:
-		my_bvs(my_read_addr(RELATIVE));
-		break;
-	case 0x78:
-		my_sei();
-		break;
-	case 0x81:
-		my_sta(my_read_addr(INDIRECT_X));
-		break;
-	case 0x84:
-		my_sty(my_read_addr(ZEROPAGE));
-		break;
-	case 0x85:
-		my_sta(my_read_addr(ZEROPAGE));
-		break;
-	case 0x86:
-		my_stx(my_read_addr(ZEROPAGE));
-		break;
-	case 0x88:
-		my_dey();
-		break;
-	case 0x8A:
-		my_txa();
-		break;
-	case 0x8C:
-		my_sty(my_read_addr(ABSOLUTE));
-		break;
-	case 0x8D:
-		my_sta(my_read_addr(ABSOLUTE));
-		break;
-	case 0x8E:
-		my_stx(my_read_addr(ABSOLUTE));
-		break;
-	case 0x90:
-		my_bcc(my_read_addr(RELATIVE));
-		break;
-	case 0x91:
-		my_sta(my_read_addr(INDIRECT_Y));
-		break;
-	case 0x94:
-		my_sty(my_read_addr(ZEROPAGE_X));
-		break;
-	case 0x95:
-		my_sta(my_read_addr(ZEROPAGE_X));
-		break;
-	case 0x96:
-		my_stx(my_read_addr(ZEROPAGE_Y));
-		break;
-	case 0x98:
-		my_tya();
-		break;
-	case 0x99:
-		my_sta(my_read_addr(ABSOLUTE_Y));
-		break;
-	case 0x9A:
-		my_txs();
-		break;
-	case 0x9D:
-		my_sta(my_read_addr(ABSOLUTE_X));
-		break;
-	case 0xA0:
-		my_ldy(my_read_op(IMMEDIATE));
-		break;
-	case 0xA1:
-		my_lda(my_read_op(INDIRECT_X));
-		break;
-	case 0xA2:
-		my_ldx(my_read_op(IMMEDIATE));
-		break;
-	case 0xA4:
-		my_ldy(my_read_op(ZEROPAGE));
-		break;
-	case 0xA5:
-		my_lda(my_read_op(ZEROPAGE));
-		break;
-	case 0xA6:
-		my_ldx(my_read_op(ZEROPAGE));
-		break;
-	case 0xA8:
-		my_tay();
-		break;
-	case 0xA9:
-		my_lda(my_read_op(IMMEDIATE));
-		break;
-	case 0xAA:
-		my_tax();
-		break;
-	case 0xAC:
-		my_ldy(my_read_op(ABSOLUTE));
-		break;
-	case 0xAD:
-		my_lda(my_read_op(ABSOLUTE));
-		break;
-	case 0xAE:
-		my_ldx(my_read_op(ABSOLUTE));
-		break;
-	case 0xB0:
-		my_bcs(my_read_addr(RELATIVE));
-		break;
-	case 0xB1:
-		my_lda(my_read_op(INDIRECT_Y));
-		break;
-	case 0xB4:
-		my_ldy(my_read_op(ZEROPAGE_X));
-		break;
-	case 0xB5:
-		my_lda(my_read_op(ZEROPAGE_X));
-		break;
-	case 0xB6:
-		my_ldx(my_read_op(ZEROPAGE_Y));
-		break;
-	case 0xB8:
-		my_clv();
-		break;
-	case 0xB9:
-		my_lda(my_read_op(ABSOLUTE_Y));
-		break;
-	case 0xBA:
-		my_tsx();
-		break;
-	case 0xBC:
-		my_ldy(my_read_op(ABSOLUTE_X));
-		break;
-	case 0xBD:
-		my_lda(my_read_op(ABSOLUTE_X));
-		break;
-	case 0xBE:
-		my_ldx(my_read_op(ABSOLUTE_Y));
-		break;
-	case 0xC0:
-		my_cpy(my_read_op(IMMEDIATE));
-		break;
-	case 0xC1:
-		my_cmp(my_read_op(INDIRECT_X));
-		break;
-	case 0xC4:
-		my_cpy(my_read_op(ZEROPAGE));
-		break;
-	case 0xC5:
-		my_cmp(my_read_op(ZEROPAGE));
-		break;
-	case 0xC8:
-		my_iny();
-		break;
-	case 0xC9:
-		my_cmp(my_read_op(IMMEDIATE));
-		break;
-	case 0xCA:
-		my_dex();
-		break;
-	case 0xCC:
-		my_cpy(my_read_op(ABSOLUTE));
-		break;
-	case 0xCD:
-		my_cmp(my_read_op(ABSOLUTE));
-		break;
-	case 0xD0:
-		my_bne(my_read_addr(RELATIVE));
-		break;
-	case 0xD1:
-		my_cmp(my_read_op(INDIRECT_Y));
-		break;
-	case 0xD5:
-		my_cmp(my_read_op(ZEROPAGE_X));
-		break;
-	case 0xD8:
-		my_cld();
-		break;
-	case 0xD9:
-		my_cmp(my_read_op(ABSOLUTE_Y));
-		break;
-	case 0xDD:
-		my_cmp(my_read_op(ABSOLUTE_X));
-		break;
-	case 0xE0:
-		my_cpx(my_read_op(IMMEDIATE));
-		break;
-	case 0xE4:
-		my_cpx(my_read_op(ZEROPAGE));
-		break;
-	case 0xE8:
-		my_inx();
-		break;
-	case 0xEA:
-		/* NOP */
-		break;
-	case 0xEC:
-		my_cpx(my_read_op(ABSOLUTE));
-		break;
-	case 0xF0:
-		my_beq(my_read_addr(RELATIVE));
-		break;
-	case 0xF8:
-		my_sed();
-		break;
+	OP(0x00, my_brk());
+	OP(0x06, my_asl(my_read_op(ZEROPAGE)));
+	OP(0x08, my_php());
+	OP(0x09, my_ora(my_read_op(IMMEDIATE)));
+	OP(0x0A, my_asl(my_read_op(ACCUMULATOR)));
+	OP(0x0E, my_asl(my_read_op(ABSOLUTE)));
+	OP(0x10, my_bpl(my_read_addr(RELATIVE)));
+	OP(0x16, my_asl(my_read_op(ZEROPAGE_X)));
+	OP(0x18, my_clc());
+	OP(0x20, my_jsr(my_read_addr(ABSOLUTE)));
+	OP(0x24, my_bit(my_read_op(ZEROPAGE)));
+	OP(0x26, my_rol(my_read_op(ZEROPAGE)));
+	OP(0x28, my_plp());
+	OP(0x2A, my_rol(my_read_op(ACCUMULATOR)));
+	OP(0x2C, my_bit(my_read_op(ABSOLUTE)));
+	OP(0x2E, my_rol(my_read_op(ABSOLUTE)));
+	OP(0x30, my_bmi(my_read_addr(RELATIVE)));
+	OP(0x38, my_sec());
+	OP(0x40, my_rti());
+	OP(0x46, my_lsr(my_read_op(ZEROPAGE)));
+	OP(0x48, my_pha());
+	OP(0x49, my_eor(my_read_op(IMMEDIATE)));
+	OP(0x4A, my_lsr(my_read_op(ACCUMULATOR)));
+	OP(0x4C, my_jmp(my_read_addr(ABSOLUTE)));
+	OP(0x4E, my_lsr(my_read_op(ABSOLUTE)));
+	OP(0x50, my_bvc(my_read_addr(RELATIVE)));
+	OP(0x56, my_lsr(my_read_op(ZEROPAGE_X)));
+	OP(0x58, my_cli());
+	OP(0x60, my_rts());
+	OP(0x66, my_ror(my_read_op(ZEROPAGE)));
+	OP(0x68, my_pla());
+	OP(0x69, my_adc(my_read_op(IMMEDIATE)));
+	OP(0x6A, my_ror(my_read_op(ACCUMULATOR)));
+	OP(0x6C, my_jmp(my_read_addr(INDIRECT)));
+	OP(0x6E, my_ror(my_read_op(ABSOLUTE)));
+	OP(0x70, my_bvs(my_read_addr(RELATIVE)));
+	OP(0x78, my_sei());
+	OP(0x81, my_sta(my_read_addr(INDIRECT_X)));
+	OP(0x84, my_sty(my_read_addr(ZEROPAGE)));
+	OP(0x85, my_sta(my_read_addr(ZEROPAGE)));
+	OP(0x86, my_stx(my_read_addr(ZEROPAGE)));
+	OP(0x88, my_dey());
+	OP(0x8A, my_txa());
+	OP(0x8C, my_sty(my_read_addr(ABSOLUTE)));
+	OP(0x8D, my_sta(my_read_addr(ABSOLUTE)));
+	OP(0x8E, my_stx(my_read_addr(ABSOLUTE)));
+	OP(0x90, my_bcc(my_read_addr(RELATIVE)));
+	OP(0x91, my_sta(my_read_addr(INDIRECT_Y)));
+	OP(0x94, my_sty(my_read_addr(ZEROPAGE_X)));
+	OP(0x95, my_sta(my_read_addr(ZEROPAGE_X)));
+	OP(0x96, my_stx(my_read_addr(ZEROPAGE_Y)));
+	OP(0x98, my_tya());
+	OP(0x99, my_sta(my_read_addr(ABSOLUTE_Y)));
+	OP(0x9A, my_txs());
+	OP(0x9D, my_sta(my_read_addr(ABSOLUTE_X)));
+	OP(0xA0, my_ldy(my_read_op(IMMEDIATE)));
+	OP(0xA1, my_lda(my_read_op(INDIRECT_X)));
+	OP(0xA2, my_ldx(my_read_op(IMMEDIATE)));
+	OP(0xA4, my_ldy(my_read_op(ZEROPAGE)));
+	OP(0xA5, my_lda(my_read_op(ZEROPAGE)));
+	OP(0xA6, my_ldx(my_read_op(ZEROPAGE)));
+	OP(0xA8, my_tay());
+	OP(0xA9, my_lda(my_read_op(IMMEDIATE)));
+	OP(0xAA, my_tax());
+	OP(0xAC, my_ldy(my_read_op(ABSOLUTE)));
+	OP(0xAD, my_lda(my_read_op(ABSOLUTE)));
+	OP(0xAE, my_ldx(my_read_op(ABSOLUTE)));
+	OP(0xB0, my_bcs(my_read_addr(RELATIVE)));
+	OP(0xB1, my_lda(my_read_op(INDIRECT_Y)));
+	OP(0xB4, my_ldy(my_read_op(ZEROPAGE_X)));
+	OP(0xB5, my_lda(my_read_op(ZEROPAGE_X)));
+	OP(0xB6, my_ldx(my_read_op(ZEROPAGE_Y)));
+	OP(0xB8, my_clv());
+	OP(0xB9, my_lda(my_read_op(ABSOLUTE_Y)));
+	OP(0xBA, my_tsx());
+	OP(0xBC, my_ldy(my_read_op(ABSOLUTE_X)));
+	OP(0xBD, my_lda(my_read_op(ABSOLUTE_X)));
+	OP(0xBE, my_ldx(my_read_op(ABSOLUTE_Y)));
+	OP(0xC0, my_cpy(my_read_op(IMMEDIATE)));
+	OP(0xC1, my_cmp(my_read_op(INDIRECT_X)));
+	OP(0xC4, my_cpy(my_read_op(ZEROPAGE)));
+	OP(0xC5, my_cmp(my_read_op(ZEROPAGE)));
+	OP(0xC8, my_iny());
+	OP(0xC9, my_cmp(my_read_op(IMMEDIATE)));
+	OP(0xCA, my_dex());
+	OP(0xCC, my_cpy(my_read_op(ABSOLUTE)));
+	OP(0xCD, my_cmp(my_read_op(ABSOLUTE)));
+	OP(0xD0, my_bne(my_read_addr(RELATIVE)));
+	OP(0xD1, my_cmp(my_read_op(INDIRECT_Y)));
+	OP(0xD5, my_cmp(my_read_op(ZEROPAGE_X)));
+	OP(0xD8, my_cld());
+	OP(0xD9, my_cmp(my_read_op(ABSOLUTE_Y)));
+	OP(0xDD, my_cmp(my_read_op(ABSOLUTE_X)));
+	OP(0xE0, my_cpx(my_read_op(IMMEDIATE)));
+	OP(0xE4, my_cpx(my_read_op(ZEROPAGE)));
+	OP(0xE8, my_inx());
+	OP(0xEA, my_nop());
+	OP(0xEC, my_cpx(my_read_op(ABSOLUTE)));
+	OP(0xF0, my_beq(my_read_addr(RELATIVE)));
+	OP(0xF8, my_sed());
 	default:
 		assert(0);
 		break;
