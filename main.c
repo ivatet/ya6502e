@@ -17,23 +17,29 @@ extern uint8_t sp, a, x, y, status;
 
 static uint8_t fake6502_mem[0x10000];
 
+#if 0
+#define my_printf printf
+#else
+#define my_printf(...)
+#endif
+
 uint8_t read6502(uint16_t address)
 {
 	uint8_t value = fake6502_mem[address];
 
-	printf(". rd(%04x) -> %02x\n", address, value);
+	my_printf(". rd(%04x) -> %02x\n", address, value);
 	return value;
 }
 
 void write6502(uint16_t address, uint8_t value)
 {
-	printf(". wr(%04x) = %02x\n", address, value);
+	my_printf(". wr(%04x) = %02x\n", address, value);
 	fake6502_mem[address] = value;
 }
 
 static void dump_fake6502_reg(void)
 {
-	printf(". pc=%04x sp=%02x a=%02x x=%02x y=%02x status=%02x\n",
+	my_printf(". pc=%04x sp=%02x a=%02x x=%02x y=%02x status=%02x\n",
 		pc, sp, a, x, y, status);
 }
 
@@ -50,19 +56,19 @@ uint8_t my6502_read(uint16_t address)
 {
 	uint8_t value = my6502_mem[address];
 
-	printf("! rd(%04x) -> %02x\n", address, value);
+	my_printf("! rd(%04x) -> %02x\n", address, value);
 	return value;
 }
 
 void my6502_write(uint16_t address, uint8_t value)
 {
-	printf("! wr(%04x) = %02x\n", address, value);
+	my_printf("! wr(%04x) = %02x\n", address, value);
 	my6502_mem[address] = value;
 }
 
 static void dump_my6502_reg(void)
 {
-	printf("! pc=%04x sp=%02x a=%02x x=%02x y=%02x status=%02x\n",
+	my_printf("! pc=%04x sp=%02x a=%02x x=%02x y=%02x status=%02x\n",
 		my_pc, my_sp, my_ac, my_x, my_y, my_sr);
 }
 
@@ -98,7 +104,8 @@ static int cmp_reg(void)
 
 int main(int argc, char *argv[])
 {
-	int i;
+	int i = 1;
+	uint16_t last_pc;
 
 	if (argc != 2) {
 		printf("Usage: %s <rom.bin>\n", getprogname());
@@ -118,11 +125,22 @@ int main(int argc, char *argv[])
 	pc = 0x400;
 	printf("altered reference pc\n");
 
+	/* We're in a trap if PC doesn't change, i.e. "jmp *" */
+	last_pc = ~0x400;
+
 	dump_fake6502_reg();
 	dump_my6502_reg();
-	for (i = 0; i < 1000000; i++)
+	while (my_pc != last_pc)
 	{
-		printf("step %d\n", i);
+		if (i % 1000000) {
+			my_printf("step %d\n", i);
+		} else {
+			/* Report on significant progress regardless of verbosity. */
+			printf("step %d\n", i);
+		}
+
+		last_pc = my_pc;
+
 		step6502();
 		my6502_step();
 
@@ -137,8 +155,10 @@ int main(int argc, char *argv[])
 			printf("! memory mismatch\n");
 			return 1;
 		}
+
+		++i;
 	}
 
-	printf("stopped\n");
+	printf("stopped at pc=0x%4x\n", my_pc);
 	return 0;
 }
