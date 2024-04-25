@@ -206,20 +206,34 @@ static void my_write_op(uint32_t op, uint8_t value)
 static void my_adc(uint8_t value)
 {
 	uint16_t result;
+	uint8_t same_sign;
+
+	same_sign = (my_ac & 0x80) == (value & 0x80);
+
 	result = (uint16_t)my_ac + (uint16_t)value;
 	if (SR_IS_SET(SR_FLAG_CARRY)) {
 		result++;
 	}
 
-	if (result >= 0x100) {
-		SR_SET(SR_FLAG_CARRY);
+	/* Overflow might have occurred. */
+	if (same_sign && (result & 0x80) != (value & 0x80)) {
+		SR_SET(SR_FLAG_OVERFLOW);
 	} else {
-		SR_CLR(SR_FLAG_CARRY);
+		SR_CLR(SR_FLAG_OVERFLOW);
 	}
 
 	/* It loses the higher byte, but it is OK because we have
 	 * already computed the carry flag to accommodate it. */
 	my_ac = result;
+
+	my_update_sr_with_carry(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO,
+	                        result >= 0x100);
+}
+
+static void my_and(uint8_t value)
+{
+	my_ac &= value;
+	my_update_sr(my_ac, SR_FLAG_NEGATIVE | SR_FLAG_ZERO);
 }
 
 /* Shift Left One Bit (Memory or Accumulator).*/
@@ -531,6 +545,21 @@ static void my_plp(void)
 	my_sr = my_pop() | SR_FLAG_UNUSED;
 }
 
+/* Subtract Memory from Accumulator with Borrow. */
+static void my_sbc(uint8_t value)
+{
+	/*
+	 * z = y - x
+	 *   = y + (-x)
+	 *   = y + ~x + 1
+	 *
+	 * The carry flag has an inverted meaning:
+	 * - Set means no borrowing, business as usual.
+	 * - Unset means to borrow, take away another one.
+	 */
+	my_adc(~value);
+}
+
 static void my_sec(void)
 {
 	my_sr |= SR_FLAG_CARRY;
@@ -607,47 +636,76 @@ void my6502_step(void)
 	uint8_t opcode = my6502_read(my_pc++);
 	switch (opcode) {
 	OP(0x00, my_brk());
+	OP(0x01, my_ora(my_read_op(INDIRECT_X)));
+	OP(0x05, my_ora(my_read_op(ZEROPAGE)));
 	OP(0x06, my_asl(my_read_op(ZEROPAGE)));
 	OP(0x08, my_php());
 	OP(0x09, my_ora(my_read_op(IMMEDIATE)));
 	OP(0x0A, my_asl(my_read_op(ACCUMULATOR)));
+	OP(0x0D, my_ora(my_read_op(ABSOLUTE)));
 	OP(0x0E, my_asl(my_read_op(ABSOLUTE)));
 	OP(0x10, my_bpl(my_read_addr(RELATIVE)));
+	OP(0x11, my_ora(my_read_op(INDIRECT_Y)));
+	OP(0x15, my_ora(my_read_op(ZEROPAGE_X)));
 	OP(0x16, my_asl(my_read_op(ZEROPAGE_X)));
 	OP(0x18, my_clc());
+	OP(0x19, my_ora(my_read_op(ABSOLUTE_Y)));
+	OP(0x1D, my_ora(my_read_op(ABSOLUTE_X)));
 	OP(0x1E, my_asl(my_read_op(ABSOLUTE_X)));
 	OP(0x20, my_jsr(my_read_addr(ABSOLUTE)));
+	OP(0x21, my_and(my_read_op(INDIRECT_X)));
 	OP(0x24, my_bit(my_read_op(ZEROPAGE)));
+	OP(0x25, my_and(my_read_op(ZEROPAGE)));
 	OP(0x26, my_rol(my_read_op(ZEROPAGE)));
 	OP(0x28, my_plp());
+	OP(0x29, my_and(my_read_op(IMMEDIATE)));
 	OP(0x2A, my_rol(my_read_op(ACCUMULATOR)));
 	OP(0x2C, my_bit(my_read_op(ABSOLUTE)));
+	OP(0x2D, my_and(my_read_op(ABSOLUTE)));
 	OP(0x2E, my_rol(my_read_op(ABSOLUTE)));
 	OP(0x30, my_bmi(my_read_addr(RELATIVE)));
+	OP(0x31, my_and(my_read_op(INDIRECT_Y)));
+	OP(0x35, my_and(my_read_op(ZEROPAGE_X)));
 	OP(0x36, my_rol(my_read_op(ZEROPAGE_X)));
 	OP(0x38, my_sec());
+	OP(0x39, my_and(my_read_op(ABSOLUTE_Y)));
+	OP(0x3D, my_and(my_read_op(ABSOLUTE_X)));
 	OP(0x3E, my_rol(my_read_op(ABSOLUTE_X)));
 	OP(0x40, my_rti());
+	OP(0x41, my_eor(my_read_op(INDIRECT_X)));
+	OP(0x45, my_eor(my_read_op(ZEROPAGE)));
 	OP(0x46, my_lsr(my_read_op(ZEROPAGE)));
 	OP(0x48, my_pha());
 	OP(0x49, my_eor(my_read_op(IMMEDIATE)));
 	OP(0x4A, my_lsr(my_read_op(ACCUMULATOR)));
 	OP(0x4C, my_jmp(my_read_addr(ABSOLUTE)));
+	OP(0x4D, my_eor(my_read_op(ABSOLUTE)));
 	OP(0x4E, my_lsr(my_read_op(ABSOLUTE)));
 	OP(0x50, my_bvc(my_read_addr(RELATIVE)));
+	OP(0x51, my_eor(my_read_op(INDIRECT_Y)));
+	OP(0x55, my_eor(my_read_op(ZEROPAGE_X)));
 	OP(0x56, my_lsr(my_read_op(ZEROPAGE_X)));
 	OP(0x58, my_cli());
+	OP(0x59, my_eor(my_read_op(ABSOLUTE_Y)));
+	OP(0x5D, my_eor(my_read_op(ABSOLUTE_X)));
 	OP(0x5E, my_lsr(my_read_op(ABSOLUTE_X)));
 	OP(0x60, my_rts());
+	OP(0x61, my_adc(my_read_op(INDIRECT_X)));
+	OP(0x65, my_adc(my_read_op(ZEROPAGE)));
 	OP(0x66, my_ror(my_read_op(ZEROPAGE)));
 	OP(0x68, my_pla());
 	OP(0x69, my_adc(my_read_op(IMMEDIATE)));
 	OP(0x6A, my_ror(my_read_op(ACCUMULATOR)));
 	OP(0x6C, my_jmp(my_read_addr(INDIRECT)));
+	OP(0x6D, my_adc(my_read_op(ABSOLUTE)));
 	OP(0x6E, my_ror(my_read_op(ABSOLUTE)));
 	OP(0x70, my_bvs(my_read_addr(RELATIVE)));
+	OP(0x71, my_adc(my_read_op(INDIRECT_Y)));
+	OP(0x75, my_adc(my_read_op(ZEROPAGE_X)));
 	OP(0x76, my_ror(my_read_op(ZEROPAGE_X)));
 	OP(0x78, my_sei());
+	OP(0x79, my_adc(my_read_op(ABSOLUTE_Y)));
+	OP(0x7D, my_adc(my_read_op(ABSOLUTE_X)));
 	OP(0x7E, my_ror(my_read_op(ABSOLUTE_X)));
 	OP(0x81, my_sta(my_read_addr(INDIRECT_X)));
 	OP(0x84, my_sty(my_read_addr(ZEROPAGE)));
@@ -710,15 +768,23 @@ void my6502_step(void)
 	OP(0xDD, my_cmp(my_read_op(ABSOLUTE_X)));
 	OP(0xDE, my_dec(my_read_addr(ABSOLUTE_X)));
 	OP(0xE0, my_cpx(my_read_op(IMMEDIATE)));
+	OP(0xE1, my_sbc(my_read_op(INDIRECT_X)));
 	OP(0xE6, my_inc(my_read_addr(ZEROPAGE)));
 	OP(0xE4, my_cpx(my_read_op(ZEROPAGE)));
+	OP(0xE5, my_sbc(my_read_op(ZEROPAGE)));
 	OP(0xE8, my_inx());
+	OP(0xE9, my_sbc(my_read_op(IMMEDIATE)));
 	OP(0xEA, my_nop());
 	OP(0xEC, my_cpx(my_read_op(ABSOLUTE)));
+	OP(0xED, my_sbc(my_read_op(ABSOLUTE)));
 	OP(0xEE, my_inc(my_read_addr(ABSOLUTE)));
 	OP(0xF0, my_beq(my_read_addr(RELATIVE)));
+	OP(0xF1, my_sbc(my_read_op(INDIRECT_Y)));
+	OP(0xF5, my_sbc(my_read_op(ZEROPAGE_X)));
 	OP(0xF6, my_inc(my_read_addr(ZEROPAGE_X)));
 	OP(0xF8, my_sed());
+	OP(0xF9, my_sbc(my_read_op(ABSOLUTE_Y)));
+	OP(0xFD, my_sbc(my_read_op(ABSOLUTE_X)));
 	OP(0xFE, my_inc(my_read_addr(ABSOLUTE_X)));
 	default:
 		assert(0);
